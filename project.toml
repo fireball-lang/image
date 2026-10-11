@@ -1,0 +1,6 @@
+name = "image"
+type = "library"
+
+[[dependency]]
+url = "https://github.com/fireball-lang/std.git"
+revision = "04c9fe6854449b626c8b5c4a06446139ee00d8b7"

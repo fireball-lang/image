@@ -1,0 +1,30 @@
+mod image;
+
+import image::{Format};
+
+import std::os::{File};
+
+pub struct ImageInfo {
+    pub format: Format,
+
+    pub width: u32,
+    pub height: u32,
+}
+
+impl ImageInfo {
+    pub func read_from(path: StringView) ?Self {
+        var i = path.index_of_last(".");
+        if (i == -1) return Option:[Self]::none();
+
+        var file = File::open(path)?;
+
+        var info: ?Self;
+        var ext = path.slice(i as u32 + 1, path.size);
+
+        if (ext == "bmp") info = image::bmp::read_info(&file);
+        else if (ext == "qoi") info = image::qoi::read_info(&file);
+
+        file.close();
+        return info;
+    }
+}

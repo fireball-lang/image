@@ -1,0 +1,172 @@
+mod image::qoi;
+
+import image::{DynamicImage, Format, RGBA8};
+import image::qoi::{Header, Colorspace, Rgba, Op, color_hash};
+
+import std::io;
+
+pub func read(r: mut io::Reader) ?DynamicImage {
+    // Header
+    var header: Header;
+    var read = r.read(&header as mut []u8)?;
+    if (read != sizeof(Header)) return Option:[DynamicImage]::none();
+
+    if (header.type_[0] != 'q' || header.type_[1] != 'o' || header.type_[2] != 'i' || header.type_[3] != 'f') {
+        return Option:[DynamicImage]::none();
+    }
+
+    if (header.colorspace != Colorspace::Srgb) {
+        return Option:[DynamicImage]::none();
+    }
+
+    header.reverse();
+
+    // Format
+    var format: Format;
+
+    if (header.channels == 3) format = Format::RGB8;
+    else if (header.channels == 4) format = Format::RGBA8;
+    else return Option:[DynamicImage]::none();
+
+    // Decode pixels
+    var img = DynamicImage::new(header.width, header.height, format);
+
+    var index: [64]Rgba;
+    var px = Rgba { rgba: RGBA8::new(0, 0, 0, 255) };
+    var run: u32 = 0;
+
+    var total_pixels = header.width * header.height;
+    var pixel_idx: u32 = 0;
+    var dst = img.mut_data().ptr;
+    var dst_offset: u32 = 0;
+
+    var chunk: [4096]u8;
+    var chunk_pos: u32 = 0;
+    var chunk_len: u32 = 0;
+
+    while (pixel_idx < total_pixels) {
+        if (run > 0) {
+            run -= 1;
+        }
+        else {
+            // Read next opcode tag byte
+            if (chunk_pos >= chunk_len) {
+                chunk_len = r.read(&chunk as mut []u8) or 0 as u32;
+                chunk_pos = 0;
+
+                if (chunk_len == 0) {
+                    img.free();
+                    return Option:[DynamicImage]::none();
+                }
+            }
+
+            var b1 = chunk[chunk_pos];
+            chunk_pos += 1;
+
+            if (b1 == Op::Rgb as u8) {
+                // Read 3 bytes (r, g, b); alpha remains unchanged
+                var c: u32 = 0;
+
+                while (c < 3) {
+                    if (chunk_pos >= chunk_len) {
+                        chunk_len = r.read(&chunk as mut []u8) or 0 as u32;
+                        chunk_pos = 0;
+
+                        if (chunk_len == 0) {
+                            img.free();
+                            return Option:[DynamicImage]::none();
+                        }
+                    }
+
+                    if (c == 0) px.rgba.r = chunk[chunk_pos];
+                    else if (c == 1) px.rgba.g = chunk[chunk_pos];
+                    else if (c == 2) px.rgba.b = chunk[chunk_pos];
+
+                    chunk_pos += 1;
+                    c += 1;
+                }
+            }
+            else if (b1 == Op::Rgba as u8) {
+                // Read 4 bytes (r, g, b, a)
+                var c: u32 = 0;
+
+                while (c < 4) {
+                    if (chunk_pos >= chunk_len) {
+                        chunk_len = r.read(&chunk as mut []u8) or 0 as u32;
+                        chunk_pos = 0;
+
+                        if (chunk_len == 0) {
+                            img.free();
+                            return Option:[DynamicImage]::none();
+                        }
+                    }
+
+                    if (c == 0) px.rgba.r = chunk[chunk_pos];
+                    else if (c == 1) px.rgba.g = chunk[chunk_pos];
+                    else if (c == 2) px.rgba.b = chunk[chunk_pos];
+                    else if (c == 3) px.rgba.a = chunk[chunk_pos];
+
+                    chunk_pos += 1;
+                    c += 1;
+                }
+            }
+            else if ((b1 & 0xC0) == (Op::Index as u8)) {
+                px = index[b1 & 0x3F];
+            }
+            else if ((b1 & 0xC0) == (Op::Diff as u8)) {
+                var dr = (((b1 >> 4) & 0x03) as i32) - 2;
+                var dg = (((b1 >> 2) & 0x03) as i32) - 2;
+                var db = ((b1 & 0x03) as i32) - 2;
+
+                px.rgba.r = ((px.rgba.r as i32) + dr) as u8;
+                px.rgba.g = ((px.rgba.g as i32) + dg) as u8;
+                px.rgba.b = ((px.rgba.b as i32) + db) as u8;
+            }
+            else if ((b1 & 0xC0) == (Op::Luma as u8)) {
+                if (chunk_pos >= chunk_len) {
+                    chunk_len = r.read(&chunk as mut []u8) or 0 as u32;
+                    chunk_pos = 0;
+
+                    if (chunk_len == 0) {
+                        img.free();
+                        return Option:[DynamicImage]::none();
+                    }
+                }
+
+                var b2 = chunk[chunk_pos];
+                chunk_pos += 1;
+
+                var vg = ((b1 & 0x3F) as i32) - 32;
+                var dr = vg - 8 + (((b2 >> 4) & 0x0F) as i32);
+                var db = vg - 8 + ((b2 & 0x0F) as i32);
+
+                px.rgba.r = ((px.rgba.r as i32) + dr) as u8;
+                px.rgba.g = ((px.rgba.g as i32) + vg) as u8;
+                px.rgba.b = ((px.rgba.b as i32) + db) as u8;
+            }
+            else if ((b1 & 0xC0) == (Op::Run as u8)) {
+                run = (b1 & 0x3F) as u32;
+            }
+        }
+
+        index[(color_hash(px) as u32) & 63] = px;
+
+        // Write pixel to image buffer
+        if (header.channels == 3) {
+            dst[dst_offset + 0] = px.rgba.r;
+            dst[dst_offset + 1] = px.rgba.g;
+            dst[dst_offset + 2] = px.rgba.b;
+            dst_offset += 3;
+        } else {
+            dst[dst_offset + 0] = px.rgba.r;
+            dst[dst_offset + 1] = px.rgba.g;
+            dst[dst_offset + 2] = px.rgba.b;
+            dst[dst_offset + 3] = px.rgba.a;
+            dst_offset += 4;
+        }
+
+        pixel_idx += 1;
+    }
+
+    return img;
+}

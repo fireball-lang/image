@@ -1,0 +1,43 @@
+mod image::qoi;
+
+import image::{RGBA8};
+
+enum Colorspace : u8 {
+    Srgb   = 0,
+    Linear = 1,
+}
+
+#[repr(Packed)]
+struct Header {
+    type_: [4]u8,
+    width: u32,
+    height: u32,
+    channels: u8,
+    colorspace: Colorspace,
+}
+
+impl Header {
+    func reverse(mut self) {
+        self.width = ((self.width & 0xFF) << 24) | (((self.width >> 8) & 0xFF) << 16) | (((self.width >> 16) & 0xFF) << 8) | self.width >> 24;
+        self.height = ((self.height & 0xFF) << 24) | (((self.height >> 8) & 0xFF) << 16) | (((self.height >> 16) & 0xFF) << 8) | self.height >> 24;
+    }
+}
+
+#[repr(Union)]
+struct Rgba {
+    rgba: RGBA8,
+    v: u32,
+}
+
+enum Op : u8 {
+    Index = 0x00, // 00xxxxxx
+    Diff  = 0x40, // 01xxxxxx
+    Luma  = 0x80, // 10xxxxxx
+    Run   = 0xC0, // 11xxxxxx
+    Rgb   = 0xFE, // 11111110
+    Rgba  = 0xFF, // 11111111
+}
+
+func color_hash(c: Rgba) u32 {
+    return (c.rgba.r as u32) * 3 + (c.rgba.g as u32) * 5 + (c.rgba.b as u32) * 7 + (c.rgba.a as u32) * 11;
+}

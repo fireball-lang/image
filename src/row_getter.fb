@@ -1,0 +1,128 @@
+mod image;
+
+import image::{Image, Pixel, Format, R8, RG8, RGB8, RGBA8};
+
+pub interface RowGetter[Px: Pixel] {
+    func format(self) Format;
+
+    func needs_buffer(self) bool;
+
+    /// Returns a row of pixel at `idx` as a particular format.
+    ///
+    /// `buffer` must be big enough to hold all pixels of a row.
+    /// When using DirectRowGetter, it ignores buffer and returns direct pixel storage from the image.
+    /// Otherwise, it converts the row into buffer and returns a slice of it.
+    func get_row(self, idx: u32, buffer: mut []Px) []Px;
+}
+
+// Direct
+
+/// Returns rows of pixels directly as stored in the image.
+pub struct DirectRowGetter[T: Pixel] {
+    pub image: &Image[T],
+}
+
+impl[T: Pixel] DirectRowGetter[T] : RowGetter[T] {
+    func format(self) Format {
+        return self.image.format();
+    }
+
+    func needs_buffer(self) bool {
+        return false;
+    }
+
+    func get_row(self, idx: u32, buffer: mut []T) []T {
+        var start = idx * self.image.stride / T::format().size();
+        return self.image.pixels.slice(start, start + self.image.width);
+    }
+}
+
+// R8 -> RGB8
+
+/// Returns rows of pixels in the RGB8 format where all components are filled
+/// with the single component stored in the image.
+pub struct R8toRGB8RowGetter {
+    pub image: &Image[R8],
+}
+
+impl R8toRGB8RowGetter : RowGetter[RGB8] {
+    func format(self) Format {
+        return Format::RGB8;
+    }
+
+    func needs_buffer(self) bool {
+        return true;
+    }
+
+    func get_row(self, idx: u32, buffer: mut []RGB8) []RGB8 {
+        var start = idx * self.image.stride / R8::format().size();
+        var row = self.image.pixels.slice(start, start + self.image.width);
+
+        for (var x = 0u; x < self.image.width; x++) {
+            var r = row[x].r;
+            buffer.ptr[x] = RGB8::new(r, r, r);
+        }
+
+        return buffer.slice(0, self.image.width);
+    }
+}
+
+// RG8 -> RGB8
+
+/// Returns rows of pixels in the RGB8 format where first two components
+/// are filled with the components stored in the image and the last one is set to 0.
+pub struct RG8toRGB8RowGetter {
+    pub image: &Image[RG8],
+}
+
+impl RG8toRGB8RowGetter : RowGetter[RGB8] {
+    func format(self) Format {
+        return Format::RGB8;
+    }
+
+    func needs_buffer(self) bool {
+        return true;
+    }
+
+    func get_row(self, idx: u32, buffer: mut []RGB8) []RGB8 {
+        var start = idx * self.image.stride / RG8::format().size();
+        var row = self.image.pixels.slice(start, start + self.image.width);
+
+        for (var x = 0u; x < self.image.width; x++) {
+            var px = row[x];
+            buffer.ptr[x] = RGB8::new(px.r, px.g, 0);
+        }
+
+        return buffer.slice(0, self.image.width);
+    }
+}
+
+// RGB8 -> RGBA8
+
+/// Returns rows of pixels in the RGBA8 format where first three components
+/// are filled with the components stored in the image and the last one is set to 255.
+pub struct RGB8toRGBA8RowGetter {
+    pub image: &Image[RGB8],
+}
+
+impl RGB8toRGBA8RowGetter : RowGetter[RGBA8] {
+    func format(self) Format {
+        return Format::RGBA8;
+    }
+
+    func needs_buffer(self) bool {
+        return true;
+    }
+
+    func get_row(self, idx: u32, buffer: mut []RGBA8) []RGBA8 {
+        var start = idx * self.image.stride / RGB8::format().size();
+        var row = self.image.pixels.slice(start, start + self.image.width);
+
+        for (var x = 0u; x < self.image.width; x++) {
+            var px = row[x];
+            buffer.ptr[x] = RGBA8::new(px.r, px.g, px.b, 255);
+        }
+
+        return buffer.slice(0, self.image.width);
+    }
+}

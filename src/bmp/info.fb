@@ -1,0 +1,42 @@
+mod image::bmp;
+
+import image::{ImageInfo, Format};
+
+import image::bmp::{BITMAPFILEHEADER, BITMAPINFOHEADER, RGBQUAD};
+
+import std::io;
+
+pub func read_info(r: mut io::Reader) ?ImageInfo {
+    // File header
+    var file_header: BITMAPFILEHEADER;
+    var read = r.read((&file_header as mut []u8))?;
+    if (read != sizeof(BITMAPFILEHEADER)) return Option:[ImageInfo]::none();
+
+    if (file_header.type_ != 0x4D42) return Option:[ImageInfo]::none();
+
+    // DIB header
+    var dib_header: BITMAPINFOHEADER;
+    read = r.read((&dib_header as mut []u8))?;
+    if (read != sizeof(BITMAPINFOHEADER)) return Option:[ImageInfo]::none();
+
+    // Height can be negative for top-down bitmaps
+    var height = dib_header.height;
+
+    if ((dib_header.height as i32) < 0) {
+        height = (-(dib_header.height as i32)) as u32;
+    }
+
+    // Format
+    var format: Format;
+
+    if (dib_header.bit_count == 8 || dib_header.bit_count == 24) format = Format::RGB8;
+    else if (dib_header.bit_count == 32) format = Format::RGBA8;
+    else return Option:[ImageInfo]::none();
+
+    // Info
+    return ImageInfo {
+        format: format,
+        width: dib_header.width,
+        height: height,
+    };
+}

@@ -1,0 +1,95 @@
+mod image;
+
+import image::{DynamicImage, Pixel, Format};
+
+import std::c::{malloc, free};
+import std::os::{File};
+
+/// An image that owns its data with a specified pixel format.
+pub struct Image[T: Pixel] {
+    pixels: mut []T,
+
+    width: u32,
+    height: u32,
+    stride: u32,
+}
+
+impl[T: Pixel] Image[T] {
+    pub func new(width: u32, height: u32) Self {
+        var size = width * height * T::format().size();
+
+        return Self {
+            pixels: MutSlice:[T] {
+                ptr: malloc(size) as mut *T,
+                size: width * height,
+            },
+            width: width,
+            height: height,
+            stride: width * T::format().size(),
+        };
+    }
+
+    pub func read_from(path: StringView) ?Self {
+        var dyn = DynamicImage::read_from(path)?;
+        return dyn.into_typed:[T]();
+    }
+
+    pub func width(self) u32 {
+        return self.width;
+    }
+
+    pub func height(self) u32 {
+        return self.height;
+    }
+
+    pub func stride(self) u32 {
+        return self.stride;
+    }
+
+    pub func format(self) Format {
+        return T::format();
+    }
+
+    pub func pixels(self) []T {
+        return self.pixels;
+    }
+
+    pub func mut_pixels(self) mut []T {
+        return self.pixels;
+    }
+
+    pub func get(self, x: u32, y: u32) T {
+        var row = &(self.pixels.ptr as *u8)[y * self.stride];
+        return (row as *T)[x];
+    }
+
+    pub func set(mut self, x: u32, y: u32, pixel: T) {
+        var row = &(self.pixels.ptr as mut *u8)[y * self.stride];
+        (row as mut *T)[x] = pixel;
+    }
+
+    /// Writes the image into a file based on the extension.
+    pub func write_to(self, path: StringView) ?bool {
+        var i = path.index_of_last(".");
+        if (i == -1) return Option:[bool]::none();
+
+        var ext = path.slice(i as u32 + 1, path.size);
+
+        var file = File::create(path)?;
+
+        if (ext == "bmp") image::bmp::write:[T](self, &file);
+        else if (ext == "qoi") image::qoi::write:[T](self, &file);
+        else {
+            file.close();
+            return Option:[bool]::none();
+        }
+
+        file.close();
+        return true;
+    }
+
+    pub func free(mut self) {
+        free(self.pixels.ptr);
+        self.pixels = MutSlice:[T] {};
+    }
+}

@@ -1,0 +1,138 @@
+mod image::bmp;
+
+import image::{DynamicImage, Format};
+import image::bmp::{BITMAPFILEHEADER, BITMAPINFOHEADER, RGBQUAD};
+
+import std::c::{malloc, free};
+import std::io;
+
+pub func read(r: mut io::Reader) ?DynamicImage {
+    // File header
+    var file_header: BITMAPFILEHEADER;
+    var bytes_read = r.read(&file_header as mut []u8)?;
+    if (bytes_read != sizeof(BITMAPFILEHEADER)) return Option:[DynamicImage]::none();
+
+    if (file_header.type_ != 0x4D42) return Option:[DynamicImage]::none();
+
+    // DIB header
+    var dib_header: BITMAPINFOHEADER;
+    bytes_read = r.read(&dib_header as mut []u8)?;
+    if (bytes_read != sizeof(BITMAPINFOHEADER)) return Option:[DynamicImage]::none();
+
+    if (dib_header.size != sizeof(BITMAPINFOHEADER)) return Option:[DynamicImage]::none();
+    if (dib_header.compression != 0) return Option:[DynamicImage]::none();
+
+    var width = dib_header.width;
+    var raw_height = dib_header.height as i32;
+    var is_top_down = raw_height < 0;
+    var height = raw_height as u32;
+
+    if (is_top_down) {
+        height = (-raw_height) as u32;
+    }
+
+    // Format
+    var bpp = dib_header.bit_count;
+    var format = Format::RGB8;
+
+    if (bpp == 8 || bpp == 24) format = Format::RGB8;
+    else if (bpp == 32) format = Format::RGBA8;
+    else return Option:[DynamicImage]::none();
+
+    // Read palette if used
+    var palette: [256]RGBQUAD;
+    var palette_bytes: u32 = 0;
+
+    if (bpp == 8) {
+        var palette_count = dib_header.clr_used;
+        if (palette_count > 256) return Option:[DynamicImage]::none();
+        if (palette_count == 0) palette_count = 256;
+
+        palette_bytes = palette_count * sizeof(RGBQUAD);
+        bytes_read = r.read(MutSlice:[u8] { ptr: &palette as mut *u8, size: palette_bytes as u64 })?;
+        if (bytes_read != palette_bytes) return Option:[DynamicImage]::none();
+    }
+
+    var img = DynamicImage::new(width, height, format);
+
+    // Skip to pixel offset
+    var current_offset = sizeof(BITMAPFILEHEADER) + dib_header.size + palette_bytes;
+
+    if (file_header.offset > current_offset) {
+        var skip_size = file_header.offset - current_offset;
+        var read = skip(r, skip_size) or 0;
+
+        if (read != skip_size) {
+            img.free();
+            return Option:[DynamicImage]::none();
+        }
+    }
+
+    // Read scanlines
+    var row_stride = ((width * (bpp as u32) + 31) / 32) * 4;
+    var row_buf = malloc(row_stride) as mut *u8;
+    var dst = img.mut_data().ptr;
+
+    for (var i = 0u; i < height; i++) {
+        var y = height - 1 - i;
+        if (is_top_down) y = i;
+
+        bytes_read = r.read(MutSlice:[u8] { ptr: row_buf, size: row_stride as u64 }) or 0;
+
+        if (bytes_read != row_stride) {
+            free(row_buf);
+            img.free();
+            return Option:[DynamicImage]::none();
+        }
+
+        var dst_row = &dst[y * img.stride()];
+
+        if (bpp == 8) {
+            // Direct palette lookup for every pixel -> RGB8
+            for (var x = 0u; x < width; x++) {
+                var idx = row_buf[x] as u32;
+                var q = palette[idx];
+
+                dst_row[x * 3 + 0] = q.red;
+                dst_row[x * 3 + 1] = q.green;
+                dst_row[x * 3 + 2] = q.blue;
+            }
+        } else if (bpp == 24) {
+            // BGR -> RGB
+            for (var x = 0u; x < width; x++) {
+                dst_row[x * 3 + 0] = row_buf[x * 3 + 2];
+                dst_row[x * 3 + 1] = row_buf[x * 3 + 1];
+                dst_row[x * 3 + 2] = row_buf[x * 3 + 0];
+            }
+        } else if (bpp == 32) {
+            // BGRA -> RGBA
+            for (var x = 0u; x < width; x++) {
+                dst_row[x * 4 + 0] = row_buf[x * 4 + 2];
+                dst_row[x * 4 + 1] = row_buf[x * 4 + 1];
+                dst_row[x * 4 + 2] = row_buf[x * 4 + 0];
+                dst_row[x * 4 + 3] = row_buf[x * 4 + 3];
+            }
+        }
+    }
+
+    free(row_buf);
+    return img;
+}
+
+func skip(r: mut io::Reader, size: u32) ?u32 {
+    var buffer: [512]u8;
+    var skipped: u32;
+
+    while (size > 0) {
+        var to_skip = size;
+        if (to_skip > 512) to_skip = 512;
+
+        var bytes = r.read((buffer as mut []u8).slice(0, to_skip)) or 0 as u32;
+        if (bytes == 0) return Option:[u32]::none();
+
+        size -= bytes;
+        skipped += bytes;
+    }
+
+    return skipped;
+}

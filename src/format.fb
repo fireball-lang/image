@@ -1,0 +1,28 @@
+mod image;
+
+pub enum Format {
+    R8,
+    RG8,
+    RGB8,
+    RGBA8,
+}
+
+impl Format {
+    /// Returns the number of components in this format.
+    pub func component_count(self) u32 {
+        if (*self == Format::R8) return 1;
+        if (*self == Format::RG8) return 2;
+        if (*self == Format::RGB8) return 3;
+        return 4;
+    }
+
+    /// Returns the size of an individual component in bytes.
+    pub func component_size(self) u32 {
+        return 1;
+    }
+
+    /// Returns the total size of a single pixel in bytes.
+    pub func size(self) u32 {
+        return self.component_size() * self.component_count();
+    }
+}

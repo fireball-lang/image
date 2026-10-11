@@ -1,0 +1,170 @@
+mod image::bmp;
+
+import image::{
+    Image, Pixel, Format, R8, RG8, RGB8, RGBA8,
+    RowGetter, DirectRowGetter, RG8toRGB8RowGetter, R8toRGB8RowGetter,
+};
+
+import image::bmp::{BITMAPFILEHEADER, BITMAPINFOHEADER, RGBQUAD};
+
+import std::c::{malloc, free};
+import std::io;
+
+/// Writes the image in a bitmap format into the provided writer.
+///
+/// Supported formats: R8, RG8 (promoted to RGB8), RGB8, RGBA8.
+pub func write[T: Pixel](img: &Image[T], w: mut io::Writer) {
+    var width = img.width();
+    var height = img.height();
+    var format = img.format();
+
+    var target_format = format;
+    if (format == Format::RG8) target_format = Format::RGB8;
+
+    var bit_count: u16 = (target_format.component_count() * 8) as u16;
+    var row_stride = ((width * target_format.component_count() + 3) / 4) * 4;
+    var image_size = row_stride * height;
+
+    var palette_size: u32 = 0;
+    if (target_format == Format::R8) palette_size = sizeof(RGBQUAD) * 256;
+
+    var file_header_size: u32 = 14;
+    var dib_header_size: u32 = sizeof(BITMAPINFOHEADER);
+    var pixel_offset = file_header_size + dib_header_size + palette_size;
+
+    // --- Headers ---
+
+    var file_header = BITMAPFILEHEADER {
+        type_: 0x4D42,
+        size: pixel_offset + image_size,
+        offset: pixel_offset,
+    };
+
+    w.write(&file_header as []u8).unwrap();
+
+    var dib_header = BITMAPINFOHEADER {
+        size: sizeof(BITMAPINFOHEADER),
+        width: width,
+        height: height,
+        planes: 1,
+        bit_count: bit_count,
+        size_image: image_size,
+    };
+
+    if (target_format == Format::R8) dib_header.clr_used = 256;
+
+    w.write(&dib_header as []u8).unwrap();
+
+    // --- Palette (R8 only) ---
+
+    if (target_format == Format::R8) {
+        var palette: [256]RGBQUAD;
+        var i: u32 = 0;
+
+        while (i < 256) {
+            var val = i as u8;
+            palette[i] = RGBQUAD { blue: val, green: val, red: val, reserved: 0 };
+            i += 1;
+        }
+
+        w.write(Slice:[u8] { ptr: &palette as *u8, size: palette_size }).unwrap();
+    }
+
+    // --- Pixels using RowGetters ---
+
+    if (format == Format::R8) {
+        var getter = DirectRowGetter:[R8] { image: img as &Image[R8] };
+        write_rows_r8(&getter, width, height, row_stride, w);
+    }
+    else if (format == Format::RG8) {
+        var getter = RG8toRGB8RowGetter { image: img as &Image[RG8] };
+        write_rows_rgb8(&getter, width, height, row_stride, w);
+    }
+    else if (format == Format::RGB8) {
+        var getter = DirectRowGetter:[RGB8] { image: img as &Image[RGB8] };
+        write_rows_rgb8(&getter, width, height, row_stride, w);
+    }
+    else if (format == Format::RGBA8) {
+        var getter = DirectRowGetter:[RGBA8] { image: img as &Image[RGBA8] };
+        write_rows_rgba8(&getter, width, height, row_stride, w);
+    }
+    else {
+        panic("unsupported format");
+    }
+}
+
+func write_rows_r8(
+    getter: RowGetter[R8],
+    _width: u32,
+    height: u32,
+    stride: u32,
+    w: mut io::Writer,
+) {
+    for (var y = height as i32 - 1; y >= 0; y--) {
+        var row = getter.get_row(y as u32, MutSlice:[R8] {});
+        write_row:[R8](row, stride, w);
+    }
+}
+
+func write_rows_rgb8(
+    getter: RowGetter[RGB8],
+    width: u32,
+    height: u32,
+    stride: u32,
+    w: mut io::Writer
+) {
+    var buffer = MutSlice:[RGB8] {
+        ptr: malloc(width * sizeof(RGB8)) as mut *RGB8,
+        size: width,
+    };
+
+    for (var y = height as i32 - 1; y >= 0; y--) {
+        var row = getter.get_row(y as u32, buffer);
+
+        for (var x = 0u; x < width; x++) {
+            var px = row[x];
+            buffer.ptr[x] = RGB8::new(px.b, px.g, px.r);
+        }
+
+        write_row:[RGB8](buffer, stride, w);
+    }
+
+    free(buffer.ptr);
+}
+
+func write_rows_rgba8(
+    getter: RowGetter[RGBA8],
+    width: u32,
+    height: u32,
+    stride: u32,
+    w: mut io::Writer
+) {
+    var buffer = MutSlice:[RGBA8] {
+        ptr: malloc(width * sizeof(RGBA8)) as mut *RGBA8,
+        size: width,
+    };
+
+    for (var y = height as i32 - 1; y >= 0; y--) {
+        var row = getter.get_row(y as u32, buffer);
+
+        for (var x = 0u; x < width; x++) {
+            var px = row[x];
+            buffer.ptr[x] = RGBA8::new(px.b, px.g, px.r, px.a);
+        }
+
+        write_row:[RGBA8](buffer, stride, w);
+    }
+
+    free(buffer.ptr);
+}
+
+const PADDING: [8]u8 = [8]u8 { 0, 0, 0, 0, 0, 0, 0, 0 };
+
+func write_row[T: Pixel](row: []T, stride: u32, w: mut io::Writer) {
+    var bytes = row.cast:[u8]();
+    w.write(bytes).unwrap();
+
+    if (bytes.size < stride) {
+        w.write((PADDING as []u8).slice(0, stride - bytes.size)).unwrap();
+    }
+}

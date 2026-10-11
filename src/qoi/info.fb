@@ -1,0 +1,36 @@
+mod image::qoi;
+
+import image::{ImageInfo, Format};
+
+import image::qoi::{Header, Colorspace};
+
+import std::io;
+
+pub func read_info(r: mut io::Reader) ?ImageInfo {
+    // Header
+    var header: Header;
+    var read = r.read(&header as mut[]u8)?;
+    if (read != sizeof(Header)) return Option:[ImageInfo]::none();
+
+    if (header.type_[0] != 'q' || header.type_[1] != 'o' || header.type_[2] != 'i' || header.type_[3] != 'f')
+        return Option:[ImageInfo]::none();
+
+    if (header.colorspace != Colorspace::Srgb)
+        return Option:[ImageInfo]::none();
+
+    header.reverse();
+
+    // Format
+    var format: Format;
+
+    if (header.channels == 3) format = Format::RGB8;
+    else if (header.channels == 4) format = Format::RGBA8;
+    else return Option:[ImageInfo]::none();
+
+    // Info
+    return ImageInfo {
+        format: format,
+        width: header.width,
+        height: header.height,
+    };
+}

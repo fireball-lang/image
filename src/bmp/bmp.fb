@@ -1,0 +1,33 @@
+mod image::bmp;
+
+#[repr(Packed)]
+struct BITMAPFILEHEADER {
+    type_: u16,
+    size: u32,
+    _reserved_1: u16,
+    _reserved_2: u16,
+    offset: u32,
+}
+
+#[repr(C)]
+struct BITMAPINFOHEADER {
+    size: u32,
+    width: u32,
+    height: u32,
+    planes: u16,
+    bit_count: u16,
+    compression: u32,
+    size_image: u32,
+    x_pels_per_meter: u32,
+    y_pels_per_meter: u32,
+    clr_used: u32,
+    clr_important: u32,
+}
+
+#[repr(C)]
+struct RGBQUAD {
+    blue: u8,
+    green: u8,
+    red: u8,
+    reserved: u8,
+}

@@ -1,0 +1,151 @@
+mod image;
+
+import image::{Format};
+
+import std::fmt::{Formatter, Display};
+
+pub interface Pixel {
+    func format() Format;
+}
+
+#[repr(C)]
+pub struct R8 {
+    pub r: u8,
+}
+
+impl R8 {
+    pub func new(r: u8) Self {
+        return Self { r: r };
+    }
+}
+
+impl R8 : Pixel {
+    pub func format() Format {
+        return Format::R8;
+    }
+}
+
+impl R8 : Eq[Self] {
+    pub func eq(self, rhs: Self) bool {
+        return self.r == rhs.r;
+    }
+}
+
+impl R8 : Display {
+    pub func display(self, fmt: Formatter) {
+        fmt.str("(");
+        fmt.u64(self.r, 10);
+        fmt.str(")");
+    }
+}
+
+#[repr(C)]
+pub struct RG8 {
+    pub r: u8,
+    pub g: u8,
+}
+
+impl RG8 {
+    pub func new(r: u8, g: u8) Self {
+        return Self { r: r, g: g };
+    }
+}
+
+impl RG8 : Pixel {
+    pub func format() Format {
+        return Format::RG8;
+    }
+}
+
+impl RG8 : Eq[Self] {
+    pub func eq(self, rhs: Self) bool {
+        return self.r == rhs.r && self.g == rhs.g;
+    }
+}
+
+impl RG8 : Display {
+    pub func display(self, fmt: Formatter) {
+        fmt.str("(");
+        fmt.u64(self.r, 10);
+        fmt.str(", ");
+        fmt.u64(self.g, 10);
+        fmt.str(")");
+    }
+}
+
+#[repr(C)]
+pub struct RGB8 {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+impl RGB8 {
+    pub func new(r: u8, g: u8, b: u8) Self {
+        return Self { r: r, g: g, b: b };
+    }
+}
+
+impl RGB8 : Pixel {
+    pub func format() Format {
+        return Format::RGB8;
+    }
+}
+
+impl RGB8 : Eq[Self] {
+    pub func eq(self, rhs: Self) bool {
+        return self.r == rhs.r && self.g == rhs.g && self.b == rhs.b;
+    }
+}
+
+impl RGB8 : Display {
+    pub func display(self, fmt: Formatter) {
+        fmt.str("(");
+        fmt.u64(self.r, 10);
+        fmt.str(", ");
+        fmt.u64(self.g, 10);
+        fmt.str(", ");
+        fmt.u64(self.b, 10);
+        fmt.str(")");
+    }
+}
+
+#[repr(C)]
+pub struct RGBA8 {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+impl RGBA8 {
+    pub func new(r: u8, g: u8, b: u8, a: u8) Self {
+        return Self { r: r, g: g, b: b, a: a };
+    }
+}
+
+impl RGBA8 : Pixel {
+    pub func format() Format {
+        return Format::RGBA8;
+    }
+}
+
+impl RGBA8 : Eq[Self] {
+    pub func eq(self, rhs: Self) bool {
+        return self.r == rhs.r && self.g == rhs.g && self.b == rhs.b && self.a == rhs.a;
+    }
+}
+
+impl RGBA8 : Display {
+    pub func display(self, fmt: Formatter) {
+        fmt.str("(");
+        fmt.u64(self.r, 10);
+        fmt.str(", ");
+        fmt.u64(self.g, 10);
+        fmt.str(", ");
+        fmt.u64(self.b, 10);
+        fmt.str(", ");
+        fmt.u64(self.a, 10);
+        fmt.str(")");
+    }
+}

@@ -1,0 +1,263 @@
+mod image::qoi;
+
+import image::{
+    Image, Pixel, Format, R8, RG8, RGB8, RGBA8,
+    RowGetter, DirectRowGetter, R8toRGB8RowGetter, RG8toRGB8RowGetter,
+};
+
+import image::qoi::{
+    Header, Colorspace,
+    Rgba, Op, color_hash,
+};
+
+import std::c::{malloc, free};
+import std::io;
+
+/// Writes the image in QOI format into the provided writer.
+///
+/// Supported formats: R8 (promoted to RGB8), RG8 (promoted to RGB8), RGB8, RGBA8.
+pub func write[T: Pixel](img: &Image[T], w: mut io::Writer) {
+    var width = img.width();
+    var height = img.height();
+    var format = img.format();
+
+    var channels: u8 = 3;
+    if (format == Format::RGBA8) channels = 4;
+
+    // Header
+    var header = Header {
+        type_: [4]u8 { 'q', 'o', 'i', 'f' },
+        width: width,
+        height: height,
+        channels: channels,
+        colorspace: Colorspace::Srgb,
+    };
+
+    header.reverse();
+    w.write(&header as []u8).unwrap();
+
+    // Pixels
+    if (format == Format::R8) {
+        var getter = R8toRGB8RowGetter { image: img as &Image[R8] };
+        encode_qoi_rgb8(&getter, width, height, w);
+    }
+    else if (format == Format::RG8) {
+        var getter = RG8toRGB8RowGetter { image: img as &Image[RG8] };
+        encode_qoi_rgb8(&getter, width, height, w);
+    }
+    else if (format == Format::RGB8) {
+        var getter = DirectRowGetter:[RGB8] { image: img as &Image[RGB8] };
+        encode_qoi_rgb8(&getter, width, height, w);
+    }
+    else if (format == Format::RGBA8) {
+        var getter = DirectRowGetter:[RGBA8] { image: img as &Image[RGBA8] };
+        encode_qoi_rgba8(&getter, width, height, w);
+    }
+    else {
+        panic("unsupported format");
+    }
+}
+
+func encode_qoi_rgb8(
+    getter: RowGetter[RGB8],
+    width: u32,
+    height: u32,
+    w: mut io::Writer
+) {
+    // Max bytes a scanline can produce: 5 bytes per pixel + 1 byte run flush
+    var out_capacity = width * 5 + 16;
+    var out_buf = malloc(out_capacity) as mut *u8;
+
+    var getter_scratch: MutSlice[RGB8];
+
+    if (getter.needs_buffer()) {
+        getter_scratch = MutSlice:[RGB8] {
+            ptr: malloc(width * sizeof(RGB8)) as mut *RGB8,
+            size: width,
+        };
+    }
+
+    // QOI state across scanlines
+    var index: [64]Rgba;
+    var px_prev = Rgba { rgba: RGBA8::new(0, 0, 0, 255) };
+    var run: u8 = 0;
+
+    for (var y = 0u; y < height; y++) {
+        var row = getter.get_row(y, getter_scratch);
+        var p: u32 = 0;
+
+        for (var x = 0u; x < width; x++) {
+            var src = row[x];
+            var px = Rgba { rgba: RGBA8::new(src.r, src.g, src.b, 255) };
+
+            if (px.v == px_prev.v) {
+                run += 1;
+
+                if (run == 62) {
+                    out_buf[p++] = Op::Run as u8 | (run - 1);
+                    run = 0;
+                }
+            }
+            else {
+                if (run > 0) {
+                    out_buf[p++] = Op::Run as u8 | (run - 1);
+                    run = 0;
+                }
+
+                var index_pos = (color_hash(px) as u32) & 63;
+
+                if (index[index_pos].v == px.v) {
+                    out_buf[p++] = Op::Index as u8 | (index_pos as u8);
+                }
+                else {
+                    index[index_pos] = px;
+
+                    var vr = ((px.rgba.r as i32) - (px_prev.rgba.r as i32)) as i8;
+                    var vg = ((px.rgba.g as i32) - (px_prev.rgba.g as i32)) as i8;
+                    var vb = ((px.rgba.b as i32) - (px_prev.rgba.b as i32)) as i8;
+
+                    var vg_r = vr - vg;
+                    var vg_b = vb - vg;
+
+                    if (vr > -3 && vr < 2 && vg > -3 && vg < 2 && vb > -3 && vb < 2) {
+                        out_buf[p++] = Op::Diff as u8 | (((vr + 2) as u8) << 4) | (((vg + 2) as u8) << 2) | ((vb + 2) as u8);
+                    }
+                    else if (vg_r > -9 && vg_r < 8 && vg > -33 && vg < 32 && vg_b > -9 && vg_b < 8) {
+                        out_buf[p++] = Op::Luma as u8 | ((vg + 32) as u8);
+                        out_buf[p++] = (((vg_r + 8) as u8) << 4) | ((vg_b + 8) as u8);
+                    }
+                    else {
+                        out_buf[p++] = Op::Rgb as u8;
+                        out_buf[p++] = px.rgba.r;
+                        out_buf[p++] = px.rgba.g;
+                        out_buf[p++] = px.rgba.b;
+                    }
+                }
+            }
+            px_prev = px;
+        }
+
+        if (p > 0) {
+            w.write(Slice:[u8] { ptr: out_buf as *u8, size: p as u64 }).unwrap();
+        }
+    }
+
+    // Flush any pending run & write QOI end padding (0, 0, 0, 0, 0, 0, 0, 1)
+    flush_qoi_end(run, w);
+
+    free(out_buf);
+    free(getter_scratch.ptr);
+}
+
+func encode_qoi_rgba8(
+    getter: RowGetter[RGBA8],
+    width: u32,
+    height: u32,
+    w: mut io::Writer
+) {
+    var out_capacity = width * 5 + 16;
+    var out_buf = malloc(out_capacity) as mut *u8;
+
+    var getter_scratch: MutSlice[RGBA8];
+
+    if (getter.needs_buffer()) {
+        getter_scratch = MutSlice:[RGBA8] {
+            ptr: malloc(width * sizeof(RGBA8)) as mut *RGBA8,
+            size: width,
+        };
+    }
+
+    var index: [64]Rgba;
+    var px_prev = Rgba { rgba: RGBA8::new(0, 0, 0, 255) };
+    var run: u8 = 0;
+
+    for (var y = 0u; y < height; y++) {
+        var row = getter.get_row(y, getter_scratch);
+        var p: u32 = 0;
+
+        for (var x = 0u; x < width; x++) {
+            var px = Rgba { rgba: row[x] };
+
+            if (px.v == px_prev.v) {
+                run += 1;
+
+                if (run == 62) {
+                    out_buf[p++] = Op::Run as u8 | (run - 1);
+                    run = 0;
+                }
+            }
+            else {
+                if (run > 0) {
+                    out_buf[p++] = Op::Run as u8 | (run - 1);
+                    run = 0;
+                }
+
+                var index_pos = (color_hash(px) as u32) & 63;
+
+                if (index[index_pos].v == px.v) {
+                    out_buf[p++] = Op::Index as u8 | (index_pos as u8);
+                }
+                else {
+                    index[index_pos] = px;
+
+                    if (px.rgba.a == px_prev.rgba.a) {
+                        var vr = ((px.rgba.r as i32) - (px_prev.rgba.r as i32)) as i8;
+                        var vg = ((px.rgba.g as i32) - (px_prev.rgba.g as i32)) as i8;
+                        var vb = ((px.rgba.b as i32) - (px_prev.rgba.b as i32)) as i8;
+
+                        var vg_r = vr - vg;
+                        var vg_b = vb - vg;
+
+                        if (vr > -3 && vr < 2 && vg > -3 && vg < 2 && vb > -3 && vb < 2) {
+                            out_buf[p++] = Op::Diff as u8 | (((vr + 2) as u8) << 4) | (((vg + 2) as u8) << 2) | ((vb + 2) as u8);
+                        }
+                        else if (vg_r > -9 && vg_r < 8 && vg > -33 && vg < 32 && vg_b > -9 && vg_b < 8) {
+                            out_buf[p++] = Op::Luma as u8 | ((vg + 32) as u8);
+                            out_buf[p++] = (((vg_r + 8) as u8) << 4) | ((vg_b + 8) as u8);
+                        }
+                        else {
+                            out_buf[p++] = Op::Rgb as u8;
+                            out_buf[p++] = px.rgba.r;
+                            out_buf[p++] = px.rgba.g;
+                            out_buf[p++] = px.rgba.b;
+                        }
+                    }
+                    else {
+                        out_buf[p++] = Op::Rgba as u8;
+                        out_buf[p++] = px.rgba.r;
+                        out_buf[p++] = px.rgba.g;
+                        out_buf[p++] = px.rgba.b;
+                        out_buf[p++] = px.rgba.a;
+                    }
+                }
+            }
+            px_prev = px;
+        }
+
+        if (p > 0) {
+            w.write(Slice:[u8] { ptr: out_buf as *u8, size: p as u64 }).unwrap();
+        }
+    }
+
+    flush_qoi_end(run, w);
+
+    free(out_buf);
+    free(getter_scratch.ptr);
+}
+
+const PADDING: [8]u8 = [8]u8 { 0, 0, 0, 0, 0, 0, 0, 1 };
+
+func flush_qoi_end(run: u8, w: mut io::Writer) {
+    var end_buf: [9]u8;
+    var len: u32 = 0;
+
+    if (run > 0) {
+        end_buf[len++] = Op::Run as u8 | (run - 1);
+    }
+
+    for (var i = 0u; i < 8; i++) {
+        end_buf[len++] = PADDING[i];
+    }
+
+    w.write((end_buf as []u8).slice(0, len)).unwrap();
+}
