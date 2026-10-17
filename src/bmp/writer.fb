@@ -123,7 +123,7 @@ func write_rows_rgb8(
 
         for (var x = 0u; x < width; x++) {
             var px = row[x];
-            buffer.ptr[x] = RGB8::new(px.b, px.g, px.r);
+            buffer[x] = RGB8::new(px.b, px.g, px.r);
         }
 
         write_row:[RGB8](buffer, stride, w);
@@ -149,7 +149,7 @@ func write_rows_rgba8(
 
         for (var x = 0u; x < width; x++) {
             var px = row[x];
-            buffer.ptr[x] = RGBA8::new(px.b, px.g, px.r, px.a);
+            buffer[x] = RGBA8::new(px.b, px.g, px.r, px.a);
         }
 
         write_row:[RGBA8](buffer, stride, w);

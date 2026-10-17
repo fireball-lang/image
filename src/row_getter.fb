@@ -60,7 +60,7 @@ impl R8toRGB8RowGetter : RowGetter[RGB8] {
 
         for (var x = 0u; x < self.image.width; x++) {
             var r = row[x].r;
-            buffer.ptr[x] = RGB8::new(r, r, r);
+            buffer[x] = RGB8::new(r, r, r);
         }
 
         return buffer.slice(0, self.image.width);
@@ -90,7 +90,7 @@ impl RG8toRGB8RowGetter : RowGetter[RGB8] {
 
         for (var x = 0u; x < self.image.width; x++) {
             var px = row[x];
-            buffer.ptr[x] = RGB8::new(px.r, px.g, 0);
+            buffer[x] = RGB8::new(px.r, px.g, 0);
         }
 
         return buffer.slice(0, self.image.width);
@@ -120,7 +120,7 @@ impl RGB8toRGBA8RowGetter : RowGetter[RGBA8] {
 
         for (var x = 0u; x < self.image.width; x++) {
             var px = row[x];
-            buffer.ptr[x] = RGBA8::new(px.r, px.g, px.b, 255);
+            buffer[x] = RGBA8::new(px.r, px.g, px.b, 255);
         }
 
         return buffer.slice(0, self.image.width);
