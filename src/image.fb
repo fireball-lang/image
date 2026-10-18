@@ -58,16 +58,6 @@ impl[T: Pixel] Image[T] {
         return self.pixels;
     }
 
-    pub func get(self, x: u32, y: u32) T {
-        var row = &(self.pixels.ptr as *u8)[y * self.stride];
-        return (row as *T)[x];
-    }
-
-    pub func set(mut self, x: u32, y: u32, pixel: T) {
-        var row = &(self.pixels.ptr as mut *u8)[y * self.stride];
-        (row as mut *T)[x] = pixel;
-    }
-
     /// Writes the image into a file based on the extension.
     pub func write_to(self, path: StringView) ?bool {
         var i = path.index_of_last(".");
@@ -91,5 +81,23 @@ impl[T: Pixel] Image[T] {
     pub func free(mut self) {
         free(self.pixels.ptr);
         self.pixels = MutSlice:[T] {};
+    }
+}
+
+impl[T: Pixel] Image[T] : Index[(u32, u32)] {
+    type Result = T;
+
+    pub func index(self, xy: (u32, u32)) &T {
+        var row = &(self.pixels.ptr as *u8)[xy[1] * self.stride];
+        return &(row as *T)[xy[0]] as &T;
+    }
+}
+
+impl[T: Pixel] Image[T] : IndexMut[(u32, u32)] {
+    type Result = T;
+
+    pub func index_mut(mut self, xy: (u32, u32)) mut &T {
+        var row = &(self.pixels.ptr as *u8)[xy[1] * self.stride];
+        return &(row as *T)[xy[0]] as mut &T;
     }
 }
